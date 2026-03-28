@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 from typing import List, Optional
 from app.schemas import PostCreate
 from app import oauth2 
+from sqlalchemy import func
 
 
 router=APIRouter(
@@ -17,12 +18,17 @@ router=APIRouter(
 
 
 
-@router.get("/",response_model=List[schemas.Post])
-def getposts(db: Session = Depends(get_db),current_user:int = Depends(oauth2.get_current_user), Limit:int=10,skip:int = 0,search:Optional[str] =""):
+@router.get("/", response_model=List[schemas.PostOut])
+def getposts(db: Session = Depends(get_db),current_user:int = Depends(oauth2.get_current_user), limit:int=10,skip:int = 0,search:Optional[str] =""):
     # cursor.execute("""SELECT * FROM posts""")
     # posts=cursor.fetchall()
-    posts = db.query(models.Post).filter(models.Post.title.contains(search)).limit(Limit).offset(skip).all()
+    posts = db.query(models.Post, func.count(models.Vote.post_id).label("votes")).join(models.Vote, models.Vote.post_id == models.Post.id, isouter=True).group_by(models.Post.id).filter(models.Post.title.contains(search)).limit(limit).offset(skip).all()
+    # formatted_results = [
+    #     {"Post":post, "votes":votes} for post,votes in results
+    # ]
+    # return formatted_results
     return posts
+
 
 
 
@@ -41,10 +47,12 @@ async def create_posts(post:PostCreate, db: Session = Depends(get_db), current_u
 
 
 
-@router.get("/{postid}",response_model=schemas.Post)
+@router.get("/{id}",response_model=schemas.PostOut)
 
-def get_post(postid:int,db: Session = Depends(get_db),current_user:int = Depends(oauth2.get_current_user)):
-    post=db.query(models.Post).filter(models.Post.id == postid).first()
+def get_post(id:int,db: Session = Depends(get_db),current_user:int = Depends(oauth2.get_current_user)):
+    # post=db.query(models.Post).filter(models.Post.id == id).first()
+
+    post=db.query(models.Post, func.count(models.Vote.post_id).label("votes")).join(models.Vote, models.Vote.post_id == models.Post.id, isouter=True).group_by(models.Post.id).filter(models.Post.id == id).first()
     
     if not post:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND,detail="ERROR 404 NOT FOUND")
@@ -52,9 +60,9 @@ def get_post(postid:int,db: Session = Depends(get_db),current_user:int = Depends
     return post
 
 
-@router.delete("/{postid}",status_code=status.HTTP_204_NO_CONTENT)
-def delete_post(postid:int, db: Session = Depends(get_db),current_user:int = Depends(oauth2.get_current_user)):
-    post=db.query(models.Post).filter(models.Post.id == postid).first()
+@router.delete("/{id}",status_code=status.HTTP_204_NO_CONTENT)
+def delete_post(id:int, db: Session = Depends(get_db),current_user:int = Depends(oauth2.get_current_user)):
+    post=db.query(models.Post).filter(models.Post.id == id).first()
     
             
     if post is None:
@@ -63,15 +71,15 @@ def delete_post(postid:int, db: Session = Depends(get_db),current_user:int = Dep
     if post.owner_id!=current_user.id:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN,detail="NOT AUTHORIZED TO PERFORM REQUESTED ACTION")
     else:
-        db.query(models.Post).filter(models.Post.id == postid).delete(synchronize_session=False)
+        db.query(models.Post).filter(models.Post.id == id).delete(synchronize_session=False)
         db.commit()
         return {Response(status_code=status.HTTP_204_NO_CONTENT)}
    
 
-@router.put("/{postid}",response_model=schemas.Post)
-def update_post(postid:int,post:PostCreate,db: Session = Depends(get_db),current_user:int = Depends(oauth2.get_current_user)):
+@router.put("/{id}",response_model=schemas.Post)
+def update_post(id:int,post:PostCreate,db: Session = Depends(get_db),current_user:int = Depends(oauth2.get_current_user)):
             
-        post_query=db.query(models.Post).filter(models.Post.id == postid)
+        post_query=db.query(models.Post).filter(models.Post.id == id)
         updated_post=post_query.first()
         if updated_post is None:    
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
